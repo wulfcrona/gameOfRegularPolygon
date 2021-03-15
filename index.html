@@ -1,0 +1,383 @@
+
+<!DOCTYPE html>
+<svg width="1000" height="800">
+</svg>
+<div>
+	<input type="radio" name="gridType" onclick="changeGrid(this);" value="tri">Triganle
+	<input type="radio" name="gridType" onclick="changeGrid(this);" value="sqr">Square
+	<input type="radio" name="gridType" onclick="changeGrid(this);" value="hex" checked="checked">Hexagon
+</div>
+<br>
+<div>
+	<button id="pp" type="button" onclick="togglePlay()">Play</button>
+	<button id="step" type="button" onclick="update()">Step</button>
+	<button id="clean" type="button" onclick="clean()">Clean</button>
+	<button id="random" type="button" onclick="randomize()">Randomize</button>
+</div>
+<br>
+<div>
+	<input type="color" id="alive" name="alive"
+           value="#000000">
+    <label for="alive">Alive</label>
+    <input type="color" id="dead" name="dead"
+           value="#ffffff">
+    <label for="dead">Dead</label>
+    <input type="color" id="border" name="border"
+           value="#000000" onchange="">
+    <label for="border">Border</label>
+    <input type="color" id="highlight" name="highlight"
+           value="#ff0000">
+    <label for="highlight">Highlight</label>
+    <input type="color" id="neighbor" name="neighbor"
+           value="#0000ff" onchange="">
+    <label for="neighbor">Highlight Neighbor</label>
+
+</div>
+<br>
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script src="https://d3js.org/d3-hexbin.v0.2.min.js"></script>
+<script>
+
+function togglePlay() {
+	pause = !pause
+
+	document.getElementById('pp').innerHTML = ['Pause','Play'][+pause]
+	document.getElementById('step').disabled = !pause
+	document.getElementById('random').disabled = !pause
+	document.getElementById('clean').disabled = !pause
+
+	if(!pause) {
+		update()
+	}
+}
+
+function clean() {
+	d3.selectAll('path')
+		.each(function(d) {d[1] = 0 })
+
+	update()
+}
+
+function randomize() {
+	d3.selectAll('path')
+		.each(function(d) {d[1] = Math.floor(Math.random() * 100) <= rnd ? 1 : 0 })
+		.style('fill', function(d) { return d[1] == 1 ? alive : dead})
+
+
+}
+
+function drawHex(x,y,r,theta) {
+	hex = []
+	for (var i = 0; i <= 6; i++) {
+		hex.push([[x+r*Math.cos(theta+1/3*Math.PI*i)],[y+r*Math.sin(theta+1/3*Math.PI*i)]])
+	}
+	return hex
+}
+
+function drawSquare(x,y,r,theta) {
+	sqr = []
+	for (var i = 0; i <= 4; i++) {
+		sqr.push([[x+r*Math.cos(theta+1/2*Math.PI*i)],[y+r*Math.sin(theta+1/2*Math.PI*i)]])
+	}
+	return sqr
+}
+
+function drawTri(x,y,r,theta) {
+	tri = []
+	for (var i = 0; i <= 3; i++) {
+		tri.push([[x+r*Math.cos(theta+2/3*Math.PI*i)],[y+r*Math.sin(theta+2/3*Math.PI*i)]])
+	}
+	return tri
+}
+//Draws a cell as a regular polygon n at x,y with radius r starting at offset theta
+function drawCell(x,y,r,theta,n) {
+	cell = []
+	interiorAngle = ((360/n)/180)*Math.PI
+	for (var i = 0; i <= n; i++) {
+		cell.push([[x+r*Math.cos(theta+interiorAngle*i)],[y+r*Math.sin(theta+interiorAngle*i)]])
+	}
+	return cell
+}
+
+//Returns list of neighbor indeices 
+function hexNeighbor(i) {
+	//first column
+	if (i%hex.cols == 0) {
+		return [i-hex.cols,i-hex.cols+1,i+1,i+hex.cols]
+	}
+	//last column
+	else if (i%hex.cols==hex.cols-1) {
+		return [i-hex.cols,i-1,i+hex.cols-1,i+hex.cols]
+	}
+	else {
+		//odd column
+		if (i%2==1) {
+			return [i-hex.cols,i-1,i+1,i+hex.cols-1,i+hex.cols,i+hex.cols+1]
+		}
+		//even column
+		else {
+			return [i-hex.cols-1,i-hex.cols,i-hex.cols+1,i-1,i+1,i+hex.cols]
+		}
+	}
+}
+
+function sqrNeighbor(i) {
+	
+	if (i%sqr.cols==0) {
+		return [i-sqr.cols,i-sqr.cols+1,i+1,i+sqr.cols,i+sqr.cols+1]
+	}
+	else if (i%sqr.cols==sqr.cols-1) {
+		return [i-sqr.cols-1,i-sqr.cols,i-1,i+sqr.cols-1,i+sqr.cols]
+	}
+	else {
+		return [i-sqr.cols-1,i-sqr.cols,i-sqr.cols+1,i-1,i+1,i+sqr.cols-1,i+sqr.cols,i+sqr.cols+1]
+	}
+}
+
+function triNeighbor(i) {
+
+	if (i%tri.cols==0) {
+		return [i-tri.cols,i-tri.cols+1,i+1,i+2,i+tri.cols,i+tri.cols+1]
+	}
+	else if (i%tri.cols==tri.cols-1) {
+		return [i-tri.cols-1,i-tri.cols,i-2,i-1,i+tri.cols-1,i+tri.cols]
+	}
+	else {
+		return [i-tri.cols-1,i-tri.cols,i-tri.cols+1,i-2,i-1,i+1,i+2,i+tri.cols-1,i+tri.cols,i+tri.cols+1]
+	}
+}
+
+function getNullSafeIndex(arr,i) {
+
+	if (arr[i]==undefined) {
+		return 0
+	}
+	else {
+		return arr[i]
+	}
+}
+
+function update() {
+	var nextState = new Array(selectedGrid.rows*selectedGrid.cols)
+
+	var currentState = new Array(selectedGrid.rows*selectedGrid.cols)
+
+	d3.selectAll('path')
+		.each(function(d) {currentState[d[0]] = d[1] })	
+
+	for (var i = 0; i < selectedGrid.cols*selectedGrid.rows; i++) {
+
+		count = getNeighbor(i).map(i => getNullSafeIndex(currentState,i)).reduce(function(a,b){return a + b})
+
+		if (currentState[i] == 1){
+			nextState[i] = +(count >= selectedGrid.minAlive && count <= selectedGrid.maxAlive)
+		} 
+		else {
+			nextState[i] = +(count >= selectedGrid.minReproduce && count <= selectedGrid.maxReproduce)
+		}
+	}
+
+	d3.selectAll('path')
+		.each(function(d) {d[1] = nextState[d[0]] })
+		.transition()
+		.style('fill', function(d) { return d[1] == 1 ? alive : dead}).duration(dt*transitionFrac);
+
+	//d3.selectAll('path').transition()
+	//	.style('fill', function(d) { return d[1] == 1 ? alive : dead}).duration(dt*transitionFrac);
+
+	if (!pause) {
+		setTimeout(update, dt);
+	}
+	
+
+}
+
+// Create grid of all dead cells
+function createGrid() {
+
+	var grid = d3.select('svg');
+	var lineGenerator = d3.line();
+
+	for (var i = 0; i < selectedGrid.rows*selectedGrid.cols; i++) {
+		grid.append('path')
+			.datum([i,0])
+			.attr('d',lineGenerator(drawCell(selectedGrid.x[i],selectedGrid.y[i],radius,selectedGrid.theta+selectedGrid.phi[i],selectedGrid.n)))
+			.attr('class','cell')
+			.style('stroke',stroke)
+			.style('stroke-width',1)
+			.attr('id','cell_'+i)
+			.style('fill',dead)
+			.on('mouseover',addHighlight)
+			.on('mouseout',removeHighlight)
+			.on('click',changeState);
+	}
+}
+
+function changeGrid(d) {
+	if(d.value != selectedGrid.name) {
+		selectedGrid=grids[d.value]
+		clearGrid()
+		createGrid()
+	}
+}
+
+function clearGrid() {
+	d3.selectAll('path').remove();
+}
+
+document.getElementById('alive').onchange=function(){
+	alive = this.value;
+}
+
+document.getElementById('dead').onchange=function(){
+	dead = this.value;
+}
+
+document.getElementById('border').onchange=function(){
+	stroke = this.value;
+	
+	d3.selectAll('path').transition()
+	.style('stroke',stroke).duration(500);
+}
+
+document.getElementById('highlight').onchange=function(){
+	highlight = this.value;
+}
+
+document.getElementById('neighbor').onchange=function(){
+	neighbor = this.value;
+}
+
+var height = 800,
+	width = 1000,
+	radius = 25,
+	theta = 0,
+	//theta = Math.PI/6, // triangle
+	//theta = Math.PI/4 // squarte
+	rnd = 10,
+	dt = 3000,
+	dead = 'white',
+	alive = 'black',
+	stroke = 'black',
+	transitionFrac = 1,
+	highlight = 'red',
+	neighbor = 'blue',
+	pause = true
+
+hex = {
+	name:"Hexagon",
+	n:6,
+	theta:0,
+	cols:2*Math.floor(width/(3*radius)),
+	rows:Math.floor(height/(2*radius*Math.sin(Math.PI/3)))-1,
+	minAlive:2,
+	maxAlive:3,
+	minReproduce:2,
+	maxReproduce:2
+}
+
+hex.x = [...Array(hex.cols*hex.rows).keys()].map(a=>radius+ Math.floor(a-Math.floor(a/hex.cols)*hex.cols)*3*radius/2)
+hex.y = [...Array(hex.cols*hex.rows).keys()].map(a=>radius+Math.floor(a/hex.cols)*2*radius*Math.sin(Math.PI/3)+(radius*Math.sin(Math.PI/3))*(Math.floor(a-Math.floor(a/hex.cols)*hex.cols) % 2))
+hex.phi = Array(hex.cols*hex.rows).fill(0)
+
+sqr = {
+	name:"Square",
+	n:4,
+	theta:Math.PI/4,
+	cols:Math.floor(width/Math.sqrt((2*radius**2))),
+	rows:Math.floor(height/Math.sqrt((2*radius**2))),
+	minAlive:2,
+	maxAlive:3,
+	minReproduce:2,
+	maxReproduce:2
+}
+
+sqr.x = [...Array(sqr.cols*sqr.rows).keys()].map(a=>radius+Math.floor(a-Math.floor(a/sqr.cols)*sqr.cols)*Math.cos(Math.PI/4)*2*radius)
+sqr.y = [...Array(sqr.cols*sqr.rows).keys()].map(a=>radius+Math.floor(a/sqr.cols)*Math.cos(Math.PI/4)*2*radius)
+sqr.phi = Array(sqr.cols*sqr.rows).fill(0)
+
+tri  = {
+	name:"Triangle",
+	n:3,
+	theta:Math.PI/6,
+	cols:2*Math.floor(width/(2*radius*Math.cos(Math.PI/6)))-2,
+	rows:2*Math.floor(height/(3*radius)),
+	minAlive:2,
+	maxAlive:3,
+	minReproduce:2,
+	maxReproduce:2
+} 
+
+tri.x =  [...Array(tri.cols*tri.rows).keys()].map(a=>radius+Math.floor(a-Math.floor(a/tri.cols)*tri.cols)*Math.cos(Math.PI/6)*radius)
+tri.y = [...Array(tri.cols*tri.rows).keys()].map(a=>radius+ Math.floor(a/tri.cols)*radius+Math.floor(Math.floor(a/tri.cols)/2)*radius-(Math.floor(a/tri.cols) % 2 == 1 ? -1 : 1)*(a%2)*(Math.cos(Math.PI/3)*radius))
+tri.phi = [...Array(tri.cols*tri.rows).keys()].map(a=>Math.PI*((a+Math.floor(a/tri.cols))%2))
+
+var grids = {
+	"tri":tri,
+	"sqr":sqr,
+	"hex":hex
+}
+
+selectedGrid = grids["hex"]
+
+createGrid()
+
+//update()
+
+function getNeighbor(i) {
+
+	switch (selectedGrid.name) {
+		case "Square":
+			return sqrNeighbor(i)
+		case "Hexagon":
+			return hexNeighbor(i)
+		case "Triangle":
+			return triNeighbor(i)
+	}
+
+	//return hexNeighbor(i)
+	//return [i-cols-1,i-cols,i-cols+1,i-2,i-1,i+1,i+2,i-2+cols,i-1+cols,i+1+cols,i+2+cols,i+cols]
+}
+
+function addHighlight(d,id,datum) {
+	
+
+	n = getNeighbor(d[0])
+
+	d3.selectAll('path')
+		.filter(function(d) {return n.includes(d[0])})
+		.style('stroke',neighbor)
+		.style('stroke-width',3)
+		.raise();
+
+
+	d3.select(this)
+		.style('stroke',highlight)
+		.style('stroke-width',4)
+		.raise();
+
+}
+
+function removeHighlight(d,i) {
+	
+	n = getNeighbor(d[0])
+
+	d3.selectAll('path')
+		.filter(function(d) {return n.includes(d[0])})
+		.style('stroke',stroke)
+		.style('stroke-width',1);
+
+	d3.select(this)
+		.style('stroke',stroke)
+		.style('stroke-width',1);
+}
+
+function changeState(d) {
+
+	d[1] = +(!(d[1]==1))
+
+	d3.select(this).transition()
+		.style('fill', function(d) { return d[1] == 1 ? alive : dead}).duration(dt*transitionFrac/4);
+}
+
+</script>
